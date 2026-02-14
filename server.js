@@ -43,28 +43,40 @@ app.post('/gerar-pix', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// 4. ROTA WEBHOOK (O QUE ESTÁ FALTANDO!)
 app.post('/webhook', async (req, res) => {
-    const paymentId = req.body?.data?.id || req.query?.['data.id'];
-    console.log("🔔 Notificação recebida ID:", paymentId);
+    // ESTA É A LINHA QUE CORRIGE O 'UNDEFINED'
+    const paymentId = req.body?.data?.id || req.query?.['data.id'] || req.body?.id || req.query?.id;
     
-    if (paymentId) {
+    console.log("🔔 Notificação recebida! ID extraído:", paymentId);
+
+    if (paymentId && paymentId !== 'undefined') {
         try {
             const response = await axios.get(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
+            
             if (response.data.status === 'approved') {
                 const userId = response.data.external_reference;
                 const valor = response.data.transaction_amount;
-                const userRef = db.ref(`usuarios/${userId}`);
-                const snap = await userRef.once('value');
-                const saldoAtual = snap.val()?.saldo || 0;
-                await userRef.update({ saldo: saldoAtual + valor });
-                console.log(`✅ SUCESSO: R$ ${valor} para ${userId}`);
+
+                if (userId) {
+                    const userRef = db.ref(`usuarios/${userId}`);
+                    const snap = await userRef.once('value');
+                    const saldoAtual = snap.val()?.saldo || 0;
+                    
+                    // ATUALIZAÇÃO NO FIREBASE
+                    await userRef.update({ saldo: saldoAtual + valor });
+                    console.log(`✅ SUCESSO: R$ ${valor} para o usuário ${userId}`);
+                } else {
+                    console.log("⚠️ Alerta: Pagamento aprovado, mas sem userId.");
+                }
             }
-        } catch (err) { console.log("Erro no checkout:", err.message); }
+        } catch (err) {
+            console.log("❌ Erro ao validar pagamento:", err.message);
+        }
     }
     res.sendStatus(200);
 });
 
+// ÚLTIMA LINHA DO ARQUIVO
 app.listen(10000, () => console.log("🚀 Servidor ONLINE na 10000"));
