@@ -9,7 +9,7 @@ app.use(cors());
 
 // --- 1. CONFIGURAÇÃO DO FIREBASE ADMIN ---
 // Você precisa baixar o arquivo .json das "Contas de Serviço" no Console do Firebase
-const serviceAccount = require("./sua-chave-firebase.json");
+const serviceAccount = require("./samir-calixto-firebase.json");
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -79,4 +79,5 @@ app.post('/webhook', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
