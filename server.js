@@ -2,10 +2,9 @@ const express = require('express');
 const { MercadoPagoConfig, Payment } = require('mercadopago');
 const admin = require('firebase-admin');
 const cors = require('cors');
+const axios = require('axios'); // Biblioteca mais estável para o saldo cair na hora
 
 const app = express();
-
-// Configuração de CORS e JSON
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
@@ -31,7 +30,7 @@ const payment = new Payment(mpClient);
 // 3. ROTA PARA GERAR PIX
 app.post(['/gerar-pix', '/criar-pix'], async (req, res) => {
     const { valor, email, userId } = req.body;
-    console.log("Recebido pedido de PIX para usuário:", userId);
+    console.log("Gerando PIX para o usuário:", userId);
 
     try {
         const result = await payment.create({
@@ -39,7 +38,7 @@ app.post(['/gerar-pix', '/criar-pix'], async (req, res) => {
                 transaction_amount: parseFloat(valor),
                 description: 'Recarga Estacione Colombo',
                 payment_method_id: 'pix',
-                external_reference: userId, // Importante: Isso identifica quem pagou
+                external_reference: userId, // CRUCIAL: O "crachá" para o Webhook saber quem pagou
                 payer: { email: email }
             }
         });
@@ -54,25 +53,27 @@ app.post(['/gerar-pix', '/criar-pix'], async (req, res) => {
     }
 });
 
-// 4. ROTA WEBHOOK (BAIXA AUTOMÁTICA)
-// É aqui que o Mercado Pago avisa que o dinheiro caiu!
+// 4. ROTA WEBHOOK (BAIXA AUTOMÁTICA DE SALDO)
+// 
 app.post('/webhook', async (req, res) => {
+    // O Mercado Pago avisa qual foi o ID do pagamento aprovado
     const paymentId = req.query["data.id"] || req.body.data?.id;
 
     if (paymentId) {
         try {
-            // Consulta o status do pagamento no Mercado Pago
-            const response = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
+            // Consulta o Mercado Pago usando AXIOS (mais seguro)
+            const response = await axios.get(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
-            const pData = await response.json();
+            
+            const pData = response.data;
 
-            // Se o pagamento foi aprovado
+            // Se o status for 'approved', a mágica acontece:
             if (pData.status === 'approved') {
-                const userId = pData.external_reference; // O userId que enviamos lá em cima
+                const userId = pData.external_reference; // Recupera o ID do dono do dinheiro
                 const valorPago = pData.transaction_amount;
 
-                // Atualiza o saldo no Firebase
+                // Acessa o Firebase e soma o saldo
                 const userRef = db.ref(`usuarios/${userId}`);
                 const snap = await userRef.once('value');
                 const saldoAtual = snap.val()?.saldo || 0;
@@ -81,15 +82,15 @@ app.post('/webhook', async (req, res) => {
                     saldo: saldoAtual + valorPago
                 });
                 
-                console.log(`SUCESSO: R$ ${valorPago} adicionados ao usuário ${userId}`);
+                console.log(`✅ SUCESSO: R$ ${valorPago} creditados ao usuário ${userId}`);
             }
         } catch (err) {
-            console.error("Erro ao processar Webhook:", err);
+            console.error("❌ Erro ao processar o aviso de pagamento:", err.message);
         }
     }
-    // Responde sempre 200 para o Mercado Pago parar de avisar
+    // Responde 200 sempre, senão o Mercado Pago fica enviando aviso pra sempre
     res.sendStatus(200);
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Servidor rodando na porta ${PORT}`));
